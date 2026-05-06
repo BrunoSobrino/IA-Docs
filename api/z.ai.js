@@ -1,175 +1,114 @@
-const crypto = require('crypto');
-const axios  = require('axios');
+const axios = require('axios');
 
-// ── Configura tu API Key de Z.ai aquí ────────────────────────────────────────
-// OPCIÓN 1: Variable de entorno en Vercel (recomendado)
-//   En Vercel → Settings → Environment Variables → agrega: Z_AI_API_KEY
-// OPCIÓN 2: Escríbela directamente aquí (solo para pruebas locales)
-const Z_AI_API_KEY = process.env.Z_AI_API_KEY;
-// ─────────────────────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+//  CONFIGURACIÓN DE API KEYS
+//  Ponlas como variables de entorno en Vercel:
+//    Settings → Environment Variables → agregar cada una
+// ═══════════════════════════════════════════════════════════════════════════════
+const GROQ_API_KEY   = process.env.GROQ_API_KEY   || '';
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
+// ═══════════════════════════════════════════════════════════════════════════════
 
-class GLM {
-    constructor() {
-        this.url         = 'https://chat.z.ai';
-        this.apiEndpoint = 'https://chat.z.ai/api/v2/chat/completions';
-        this.models = {
-            'glm-4.6':              'GLM-4-6-API-V1',
-            'glm-4.6v':             'glm-4.6v',
-            'glm-4.5':              '0727-360B-API',
-            'glm-4.5-air':          '0727-106B-API',
-            'glm-4.5v':             'glm-4.5v',
-            'glm-4.1v-9b-thinking': 'GLM-4.1V-Thinking-FlashX',
-            'z1-rumination':        'deep-research',
-            'z1-32b':               'zero',
-            'chatglm':              'glm-4-flash',
-            '0808-360b-dr':         '0808-360B-DR',
-            'glm-4-32b':            'glm-4-air-250414'
-        };
+// ─── Modelos disponibles por proveedor ───────────────────────────────────────
+const PROVIDERS = {
+    groq: {
+        baseURL: 'https://api.groq.com/openai/v1',
+        apiKey:  () => GROQ_API_KEY,
+        models: {
+            'default':    'llama-3.3-70b-versatile',  // Recomendado — rápido y capaz
+            'fast':       'llama-3.1-8b-instant',      // Ultra rápido, respuestas cortas
+            'smart':      'llama-3.3-70b-versatile',   // Mayor razonamiento
+            'glm-4.6':    'llama-3.3-70b-versatile',   // Alias de compatibilidad
+            'glm-4.5':    'llama-3.3-70b-versatile',
+            'chatglm':    'llama-3.1-8b-instant',
+            'z1-32b':     'llama-3.3-70b-versatile',
+        }
+    },
+    gemini: {
+        baseURL: 'https://generativelanguage.googleapis.com/v1beta/openai',
+        apiKey:  () => GEMINI_API_KEY,
+        models: {
+            'default':    'gemini-2.0-flash',
+            'fast':       'gemini-2.0-flash',
+            'smart':      'gemini-2.5-flash-preview-05-20',
+            'glm-4.6':    'gemini-2.0-flash',
+            'glm-4.5':    'gemini-2.5-flash-preview-05-20',
+            'chatglm':    'gemini-2.0-flash',
+            'z1-32b':     'gemini-2.5-flash-preview-05-20',
+        }
     }
+};
 
-    getDateTime() {
-        const now  = new Date();
-        const pad  = n => String(n).padStart(2, '0');
-        const days = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
-        return {
-            datetime: `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`,
-            date:     `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}`,
-            time:     `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`,
-            weekday:  days[now.getDay()]
-        };
-    }
+// ─── Llamada a cualquier proveedor OpenAI-compatible ─────────────────────────
+async function callProvider(providerName, modelAlias, messages) {
+    const provider   = PROVIDERS[providerName];
+    const apiKey     = provider.apiKey();
+    const model      = provider.models[modelAlias] || provider.models['default'];
 
-    async chat(messages, options = {}) {
-        const { model = 'glm-4.6', systemMessage, search = false, userName } = options;
+    if (!apiKey) throw new Error(`API Key de ${providerName} no configurada.`);
 
-        if (!this.models[model]) throw new Error(`Modelos disponibles: ${Object.keys(this.models).join(', ')}.`);
-        if (!Z_AI_API_KEY || Z_AI_API_KEY === 'TU_API_KEY_AQUI') throw new Error('API Key de Z.ai no configurada.');
+    console.log(`[AI] Usando ${providerName} → modelo: ${model}`);
 
-        const msgs = [];
-        if (systemMessage) msgs.push({ role: 'system', content: systemMessage });
-        if (typeof messages === 'string') msgs.push({ role: 'user', content: messages });
-        else msgs.push(...messages);
-
-        console.log('[GLM] Iniciando chat | modelo:', model, '→', this.models[model]);
-        console.log('[GLM] Mensajes en sesión:', msgs.length);
-
-        const requestBody = {
-            model:       this.models[model],
-            messages:    msgs,
-            stream:      true,
-            temperature: 0.7,
-            top_p:       0.9,
+    const response = await axios.post(
+        `${provider.baseURL}/chat/completions`,
+        {
+            model,
+            messages,
             max_tokens:  4096,
-        };
+            temperature: 0.7,
+            stream:      false,   // Sin stream — más simple y confiable en Vercel
+        },
+        {
+            headers: {
+                'Authorization': `Bearer ${apiKey}`,
+                'Content-Type':  'application/json',
+            },
+            timeout: 55000,   // 55s (límite de Vercel Hobby es 60s)
+        }
+    );
 
-        let response;
+    const content = response.data?.choices?.[0]?.message?.content;
+    if (!content) throw new Error(`${providerName} no retornó contenido.`);
+
+    console.log(`[AI] Respuesta recibida — ${content.length} caracteres`);
+    return content.trim();
+}
+
+// ─── Función principal con fallback automático ────────────────────────────────
+async function chat(messages, modelAlias = 'default') {
+    const errors = [];
+
+    // Intentar Groq primero (más rápido)
+    if (GROQ_API_KEY) {
         try {
-            response = await axios.post(this.apiEndpoint, requestBody, {
-                headers: {
-                    'Authorization': `Bearer ${Z_AI_API_KEY}`,
-                    'Content-Type':  'application/json',
-                    'Accept':        'text/event-stream',
-                    'User-Agent':    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                },
-                responseType: 'stream',
-                timeout:      60000,
-            });
+            return await callProvider('groq', modelAlias, messages);
         } catch (err) {
-            const status = err.response?.status;
-            const body   = err.response?.data;
-            console.error('[GLM] Error HTTP:', status, body || err.message);
-            if (status === 401) throw new Error('API Key inválida o sin permisos (401).');
-            if (status === 403) throw new Error('API Key sin acceso a este modelo (403).');
-            if (status === 429) throw new Error('Límite de peticiones alcanzado (429). Espera un momento.');
-            throw new Error(`Error conectando a Z.ai: ${status || err.message}`);
+            console.warn(`[AI] Groq falló: ${err.message}. Intentando Gemini...`);
+            errors.push(`Groq: ${err.message}`);
         }
-
-        console.log('[GLM] HTTP status:', response.status);
-        console.log('[GLM] Content-Type:', response.headers['content-type']);
-
-        let fullContent = '';
-        let lineBuffer  = '';
-        let chunkCount  = 0;
-
-        for await (const chunk of response.data) {
-            chunkCount++;
-            const raw = chunk.toString();
-
-            // Log diagnóstico — primeros 5 chunks para ver formato real
-            if (chunkCount <= 5) {
-                console.log(`[GLM] Chunk #${chunkCount}:`, JSON.stringify(raw.slice(0, 400)));
-            }
-
-            lineBuffer += raw;
-            const lines = lineBuffer.split('\n');
-            lineBuffer  = lines.pop() || '';
-
-            for (const line of lines) {
-                const trimmed = line.trim();
-                if (!trimmed || !trimmed.startsWith('data:')) continue;
-
-                const dataStr = trimmed.slice(5).trim();
-                if (dataStr === '[DONE]') {
-                    console.log('[GLM] Stream completado → [DONE]');
-                    continue;
-                }
-
-                try {
-                    const parsed = JSON.parse(dataStr);
-
-                    // ── Formato 1: OpenAI-compatible (estándar para API keys de Z.ai)
-                    const delta = parsed?.choices?.[0]?.delta?.content;
-                    if (typeof delta === 'string') {
-                        fullContent += delta;
-                        continue;
-                    }
-
-                    // ── Formato 2: content directo en el objeto
-                    if (typeof parsed?.content === 'string') {
-                        fullContent += parsed.content;
-                        continue;
-                    }
-
-                    // ── Formato 3: SSE nativo de Z.ai (usado en web sin API key)
-                    if (parsed?.type === 'chat:completion' && parsed?.data) {
-                        const eventData = parsed.data;
-                        if (eventData.delta_content && eventData.phase !== 'thinking') {
-                            fullContent += eventData.delta_content;
-                        }
-                        continue;
-                    }
-
-                    // ── Formato 4: message completo (algunos modelos retornan sin stream real)
-                    const msgContent = parsed?.choices?.[0]?.message?.content;
-                    if (typeof msgContent === 'string') {
-                        fullContent += msgContent;
-                        continue;
-                    }
-
-                } catch (_) {
-                    // línea no es JSON válido, ignorar
-                }
-            }
-        }
-
-        console.log('[GLM] Chunks totales:', chunkCount);
-        console.log('[GLM] fullContent length:', fullContent.length);
-        if (!fullContent.trim()) {
-            console.warn('[GLM] ⚠ fullContent vacío después del stream completo');
-        }
-
-        return {
-            content:   fullContent.trim(),
-            reasoning: '',
-            search:    []
-        };
     }
+
+    // Fallback a Gemini
+    if (GEMINI_API_KEY) {
+        try {
+            return await callProvider('gemini', modelAlias, messages);
+        } catch (err) {
+            console.error(`[AI] Gemini también falló: ${err.message}`);
+            errors.push(`Gemini: ${err.message}`);
+        }
+    }
+
+    // Si ninguno funciona
+    throw new Error(
+        errors.length > 0
+            ? `Todos los proveedores fallaron — ${errors.join(' | ')}`
+            : 'No hay API Keys configuradas. Agrega GROQ_API_KEY y/o GEMINI_API_KEY en Vercel.'
+    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 
-const sessions    = {};
-const glmInstance = new GLM();
+const sessions = {};
 
 const SYSTEM_PROMPT = `Eres un asistente inteligente especializado en generar documentos profesionales. 
 Cuando el usuario pida generar un documento, debes responder con un JSON especial en este formato exacto:
@@ -234,8 +173,7 @@ Para txt y html, solo incluye:
 Cuando el usuario NO pide un documento, responde normalmente como asistente conversacional.
 Responde siempre en el idioma del usuario.`;
 
-// ─────────────────────────────────────────────────────────────────────────────
-
+// ─── Handler de Vercel ────────────────────────────────────────────────────────
 module.exports = async (req, res) => {
     if (req.method === 'OPTIONS') { res.status(200).end(); return; }
     if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
@@ -248,19 +186,21 @@ module.exports = async (req, res) => {
 
         sessions[sessionId].push({ role: 'user', content: message });
 
+        // Mantener últimos 20 mensajes para no exceder contexto
         if (sessions[sessionId].length > 20) {
             sessions[sessionId] = sessions[sessionId].slice(-20);
         }
 
-        const result = await glmInstance.chat(sessions[sessionId], { model, systemMessage: SYSTEM_PROMPT });
-        const aiContent = result.content;
+        // Construir mensajes con system prompt
+        const fullMessages = [
+            { role: 'system', content: SYSTEM_PROMPT },
+            ...sessions[sessionId]
+        ];
+
+        const aiContent = await chat(fullMessages, model);
 
         if (!aiContent) {
-            console.error('[Chat] Respuesta vacía | sessionId:', sessionId);
-            return res.status(502).json({
-                status: false,
-                error:  'El modelo no retornó contenido. Intenta de nuevo.'
-            });
+            return res.status(502).json({ status: false, error: 'El modelo no retornó contenido. Intenta de nuevo.' });
         }
 
         sessions[sessionId].push({ role: 'assistant', content: aiContent });
@@ -287,7 +227,7 @@ module.exports = async (req, res) => {
             model,
             sessionId,
             content:   displayContent,
-            reasoning: result.reasoning || null,
+            reasoning: null,
             docgen:    docgenData
         });
 
