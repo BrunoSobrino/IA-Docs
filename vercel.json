@@ -6,9 +6,9 @@
     }
   },
   "routes": [
-    { "src": "/api/chat",     "dest": "/func/z.ai.js" },
-    { "src": "/api/generate", "dest": "/func/generate.js" },
-    { "src": "/api/download", "dest": "/func/download.js" },
+    { "src": "/api/chat",     "dest": "/api/z.ai.js" },
+    { "src": "/api/generate", "dest": "/api/generate.js" },
+    { "src": "/api/download", "dest": "/api/download.js" },
     { "src": "/(.*)",         "dest": "/public/$1" }
   ],
   "headers": [
