@@ -5,7 +5,7 @@ const axios  = require('axios');
 // OPCIÓN 1: Variable de entorno en Vercel (recomendado)
 //   En Vercel → Settings → Environment Variables → agrega: Z_AI_API_KEY
 // OPCIÓN 2: Escríbela directamente aquí (solo para pruebas locales)
-const Z_AI_API_KEY = process.env.Z_AI_API_KEY || 'a3cb561f7ad1483e911f0c4256251999.FhB7PjgzHgjg1RDU';
+const Z_AI_API_KEY = process.env.Z_AI_API_KEY;
 // ─────────────────────────────────────────────────────────────────────────────
 
 class GLM {
