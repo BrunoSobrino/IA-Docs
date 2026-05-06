@@ -1,0 +1,24 @@
+{
+  "version": 2,
+  "functions": {
+    "func/*.js": {
+      "maxDuration": 60
+    }
+  },
+  "routes": [
+    { "src": "/api/chat",     "dest": "/func/z.ai.js" },
+    { "src": "/api/generate", "dest": "/func/generate.js" },
+    { "src": "/api/download", "dest": "/func/download.js" },
+    { "src": "/(.*)",         "dest": "/public/$1" }
+  ],
+  "headers": [
+    {
+      "source": "/api/(.*)",
+      "headers": [
+        { "key": "Access-Control-Allow-Origin",  "value": "*" },
+        { "key": "Access-Control-Allow-Methods", "value": "GET,POST,OPTIONS" },
+        { "key": "Access-Control-Allow-Headers", "value": "Content-Type" }
+      ]
+    }
+  ]
+}
