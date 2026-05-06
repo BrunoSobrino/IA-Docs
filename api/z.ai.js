@@ -197,6 +197,15 @@ class GLM {
                             }
                             fullContent += eventData.delta_content;
                             lastYieldedAnswerLength += eventData.delta_content.length;
+                        } else if (!phase || phase === 'default' || phase === 'content') {
+                            // ── FIX: algunos modelos no marcan phase='answer', solo mandan delta_content
+                            // Si no estamos en thinking y no hay phase específico, es la respuesta directa
+                            if (!inAnswerPhase) {
+                                inAnswerPhase = true;
+                                answerStartIndex = mainBuffer.length - contentChunk.length;
+                            }
+                            fullContent += eventData.delta_content;
+                            lastYieldedAnswerLength += eventData.delta_content.length;
                         }
                     }
 
@@ -213,6 +222,24 @@ class GLM {
                     }
                 } catch (_) {}
             }
+        }
+
+        // ── FIX: Fallback si fullContent sigue vacío pero mainBuffer tiene contenido
+        // Esto cubre casos donde el stream completó sin marcar phase='answer' ni phase vacío
+        if (!fullContent.trim() && mainBuffer.length > 0) {
+            const rawOutput = mainBuffer.join('');
+            // Remover bloques de thinking (<details>...</details>) que genera GLM
+            fullContent = rawOutput
+                .replace(/<details[\s\S]*?<\/details>/gi, '')
+                .replace(/<glm_block[\s\S]*?<\/glm_block>/gi, '')
+                .trim();
+            console.log('[GLM] Fallback aplicado — fullContent reconstruido desde mainBuffer');
+        }
+
+        // ── FIX: Si aún está vacío y hay reasoningContent, algo salió mal con el stream.
+        // Loguear para diagnóstico pero no retornar vacío al usuario.
+        if (!fullContent.trim()) {
+            console.warn('[GLM] ADVERTENCIA: fullContent vacío después del stream. mainBuffer length:', mainBuffer.length);
         }
 
         return {
@@ -324,7 +351,17 @@ module.exports = async (req, res) => {
             systemMessage: SYSTEM_PROMPT
         });
 
-        const aiContent = result.content;
+        // ── FIX: usar reasoning como fallback si content sigue vacío
+        const aiContent = result.content || result.reasoning || '';
+
+        // ── FIX: si todo está vacío, retornar error claro en vez de mensaje en blanco
+        if (!aiContent) {
+            console.error('[Chat] Respuesta vacía del modelo para sessionId:', sessionId);
+            return res.status(502).json({
+                status: false,
+                error: 'El modelo no retornó contenido. Intenta de nuevo.'
+            });
+        }
 
         // Add AI response to session
         sessions[sessionId].push({ role: 'assistant', content: aiContent });
