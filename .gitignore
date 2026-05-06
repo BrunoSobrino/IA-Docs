@@ -1,0 +1,8 @@
+node_modules/
+.vercel/
+documentos/tmp/*
+!documentos/tmp/.gitkeep
+*.log
+.DS_Store
+.env
+.env.local
